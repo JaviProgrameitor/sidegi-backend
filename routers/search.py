@@ -447,11 +447,9 @@ async def search_ia(body: SearchRequest):
 
         if groq_api_key:
             try:
-                from groq import Groq
-                cliente_groq = Groq(api_key=groq_api_key)
-                print("Enviando prompt de RAG a Groq...")
-                respuesta_llm = cliente_groq.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                from services.groq_client import completar_chat_con_fallback
+                print("Enviando prompt de RAG a Groq con rotación de modelos...")
+                respuesta_ia_texto = await completar_chat_con_fallback(
                     messages=[
                         {
                             "role": "system",
@@ -471,7 +469,6 @@ async def search_ia(body: SearchRequest):
                     temperature=0.3,
                     max_tokens=1500,
                 )
-                respuesta_ia_texto = respuesta_llm.choices[0].message.content
                 print("Respuesta recibida exitosamente desde Groq.")
             except Exception as error_groq:
                 print(f"Error al conectar con Groq: {error_groq}. Iniciando generación local.")

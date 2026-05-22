@@ -56,6 +56,22 @@ class MockCollectionQuery:
             if folder_id and str(meta.get("folder_id")) != str(folder_id):
                 continue
                 
+            # Soft delete: omitir si está marcado como eliminado lógicamente (esta_eliminado = 1)
+            if meta.get("esta_eliminado") == 1:
+                continue
+                
+            doc_id = meta.get("document_id")
+            if doc_id:
+                ruta_int = f"./depuracion_local/{doc_id}.json"
+                if os.path.exists(ruta_int):
+                    try:
+                        with open(ruta_int, "r", encoding="utf-8") as f_int:
+                            datos_int = json.load(f_int)
+                        if datos_int.get("esta_eliminado") == 1:
+                            continue
+                    except Exception:
+                        pass
+                
             item_emb = item.get("embedding", [])
             if len(item_emb) == len(q_emb) and len(q_emb) > 0:
                 similitud = sum(x * y for x, y in zip(item_emb, q_emb))
@@ -134,6 +150,23 @@ def search_documents(body: SearchRequest):
     output = []
     for i, doc in enumerate(results["documents"][0]):
         meta = results["metadatas"][0][i]
+        
+        # Soft delete: omitir si está marcado como eliminado lógicamente (esta_eliminado = 1)
+        if meta.get("esta_eliminado") == 1:
+            continue
+            
+        doc_id = meta.get("document_id")
+        if doc_id:
+            ruta_int = f"./depuracion_local/{doc_id}.json"
+            if os.path.exists(ruta_int):
+                try:
+                    with open(ruta_int, "r", encoding="utf-8") as f_int:
+                        datos_int = json.load(f_int)
+                    if datos_int.get("esta_eliminado") == 1:
+                        continue
+                except Exception:
+                    pass
+        
         distance = results["distances"][0][i]
         similarity = round(1 - distance, 4)
 
@@ -241,6 +274,9 @@ async def search_ia(body: SearchRequest):
                                     continue
                                 if folder_id_final and str(datos_int.get("carpeta_id")) != str(folder_id_final):
                                     continue
+                                # Soft delete: omitir si está marcado como eliminado lógicamente (esta_eliminado = 1)
+                                if datos_int.get("esta_eliminado") == 1:
+                                    continue
                             else:
                                 # Excluir si no hay registro de integridad local por seguridad
                                 continue
@@ -273,6 +309,10 @@ async def search_ia(body: SearchRequest):
                     for item in datos_vectores:
                         meta = item.get("metadata", {})
                         if body.user_id and str(meta.get("user_id")) != str(body.user_id):
+                            continue
+                        
+                        # Soft delete: omitir si está marcado como eliminado lógicamente (esta_eliminado = 1)
+                        if meta.get("esta_eliminado") == 1:
                             continue
                         
                         # Recalcular folder_id_final localmente para el mock

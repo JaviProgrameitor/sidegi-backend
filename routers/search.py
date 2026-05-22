@@ -102,13 +102,22 @@ model = get_embedder()
 def search_documents(body: SearchRequest):
     query_embedding = model.encode(body.query).tolist()
 
+    # Unificar y sanear el ID de la carpeta
+    folder_id_final = None
+    for valor in [body.folder_id, body.carpeta_id, body.id_folder, body.id_carpeta]:
+        if valor is not None:
+            valor_str = str(valor).strip()
+            if valor_str and valor_str.lower() not in ("null", "undefined", "none"):
+                folder_id_final = valor_str
+                break
+
     where_filter = {"user_id": {"$eq": body.user_id}}
 
-    if body.folder_id:
+    if folder_id_final:
         where_filter = {
             "$and": [
                 {"user_id": {"$eq": body.user_id}},
-                {"folder_id": {"$eq": body.folder_id}},
+                {"folder_id": {"$eq": folder_id_final}},
             ]
         }
 
@@ -168,12 +177,21 @@ async def search_ia(body: SearchRequest):
                 except (ValueError, TypeError):
                     usr_id_val = body.user_id
                     
+                # Unificar y sanear el ID de la carpeta
+                folder_id_final = None
+                for valor in [body.folder_id, body.carpeta_id, body.id_folder, body.id_carpeta]:
+                    if valor is not None:
+                        valor_str = str(valor).strip()
+                        if valor_str and valor_str.lower() not in ("null", "undefined", "none"):
+                            folder_id_final = valor_str
+                            break
+
                 folder_id_val = None
-                if body.folder_id:
+                if folder_id_final:
                     try:
-                        folder_id_val = int(body.folder_id)
+                        folder_id_val = int(folder_id_final)
                     except (ValueError, TypeError):
-                        folder_id_val = body.folder_id
+                        folder_id_val = folder_id_final
 
                 # La función buscar_fragmentos_similares recibe consulta_embedding, usuario_id_filtro, carpeta_id_filtro y limite
                 resultados_rpc = await cliente_supabase.rpc("buscar_fragmentos_similares", {
@@ -195,6 +213,15 @@ async def search_ia(body: SearchRequest):
             candidatos = []
             ruta_depuracion = "./depuracion_local"
             
+            # Recalcular folder_id_final localmente para fallback
+            folder_id_final = None
+            for valor in [body.folder_id, body.carpeta_id, body.id_folder, body.id_carpeta]:
+                if valor is not None:
+                    valor_str = str(valor).strip()
+                    if valor_str and valor_str.lower() not in ("null", "undefined", "none"):
+                        folder_id_final = valor_str
+                        break
+            
             # Buscar en los archivos individuales embeddings_{id}.json
             if os.path.exists(ruta_depuracion):
                 for archivo_nombre in os.listdir(ruta_depuracion):
@@ -212,7 +239,7 @@ async def search_ia(body: SearchRequest):
                                     datos_int = json.load(f_int)
                                 if body.user_id and str(datos_int.get("usuario_id")) != str(body.user_id):
                                     continue
-                                if body.folder_id and str(datos_int.get("carpeta_id")) != str(body.folder_id):
+                                if folder_id_final and str(datos_int.get("carpeta_id")) != str(folder_id_final):
                                     continue
                             else:
                                 # Excluir si no hay registro de integridad local por seguridad
@@ -247,7 +274,17 @@ async def search_ia(body: SearchRequest):
                         meta = item.get("metadata", {})
                         if body.user_id and str(meta.get("user_id")) != str(body.user_id):
                             continue
-                        if body.folder_id and str(meta.get("folder_id")) != str(body.folder_id):
+                        
+                        # Recalcular folder_id_final localmente para el mock
+                        folder_id_final = None
+                        for valor in [body.folder_id, body.carpeta_id, body.id_folder, body.id_carpeta]:
+                            if valor is not None:
+                                valor_str = str(valor).strip()
+                                if valor_str and valor_str.lower() not in ("null", "undefined", "none"):
+                                    folder_id_final = valor_str
+                                    break
+                                    
+                        if folder_id_final and str(meta.get("folder_id")) != str(folder_id_final):
                             continue
                             
                         v_emb = item.get("embedding", [])

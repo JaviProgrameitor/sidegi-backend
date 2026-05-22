@@ -15,6 +15,90 @@ from schemas.document import UploadResponse
 
 enrutador = APIRouter()
 
+
+async def ejecutar_auditoria_silenciosa(documento_id: str, titulo: str = ""):
+    """
+    Auditoría nativa fire-and-forget: se ejecuta en background después de cada
+    indexación exitosa. Usa tokens reducidos para no agotar el rate limit.
+    Si falla, solo logea — nunca bloquea al usuario.
+    """
+    try:
+        from services.groq_client import completar_chat_con_fallback
+        from routers.auditoria import obtener_texto_documento, calcular_resumen_criptografico
+
+        contenido, titulo_doc = await obtener_texto_documento(documento_id)
+        titulo_final = titulo or titulo_doc
+        limite_contenido = contenido[:8000]  # Menos contexto = menos tokens
+
+        hallazgos = await completar_chat_con_fallback(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Eres un auditor automático de SIGEDI. Analiza el documento y genera un reporte "
+                        "BREVE (máximo 200 palabras) con: 1) Tipo de documento detectado, "
+                        "2) Banderas rojas o anomalías (si existen), 3) Nivel de riesgo (bajo/medio/alto/critico). "
+                        "Si no hay nada sospechoso, indícalo brevemente. Responde en español, formato Markdown."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Documento: {titulo_final}\n\n{limite_contenido}",
+                },
+            ],
+            temperature=0.1,
+            max_tokens=800,
+        )
+
+        # Clasificar nivel de riesgo por palabras clave
+        texto_evaluar = hallazgos.lower()
+        if any(p in texto_evaluar for p in ["fraude", "corrupción", "ilegal", "delito", "crítico"]):
+            nivel_riesgo = "critico"
+        elif any(p in texto_evaluar for p in ["irregular", "sospechoso", "discrepancia", "sobrecosto"]):
+            nivel_riesgo = "alto"
+        elif any(p in texto_evaluar for p in ["inconsistencia", "omisión", "falta"]):
+            nivel_riesgo = "medio"
+        else:
+            nivel_riesgo = "bajo"
+
+        hash_auditoria = calcular_resumen_criptografico(hallazgos)
+
+        # Intentar guardar en Supabase
+        guardado_remoto = False
+        if cliente_supabase:
+            try:
+                guardado_remoto = await cliente_supabase.insertar("documentos_auditoria", {
+                    "documento_id": documento_id,
+                    "hallazgos": {"texto": hallazgos, "enfoque": "auto_nativa"},
+                    "nivel_riesgo": nivel_riesgo,
+                    "hash_reporte": hash_auditoria
+                })
+            except Exception:
+                pass
+
+        # Fallback local si Supabase falló
+        if not guardado_remoto:
+            try:
+                os.makedirs("./depuracion_local", exist_ok=True)
+                ruta_reporte = f"./depuracion_local/auditoria_{documento_id}.json"
+                with open(ruta_reporte, "w", encoding="utf-8") as f_aud:
+                    json.dump({
+                        "documento_id": documento_id,
+                        "nombre_documento": titulo_final,
+                        "hallazgos": hallazgos,
+                        "enfoque": "auto_nativa",
+                        "nivel_riesgo": nivel_riesgo,
+                        "hash_reporte": hash_auditoria
+                    }, f_aud, ensure_ascii=False, indent=4)
+            except Exception:
+                pass
+
+        print(f"[AUDITORÍA NATIVA] ✅ Completada para '{titulo_final}' — Riesgo: {nivel_riesgo}")
+
+    except Exception as error_audit:
+        # Nunca debe bloquear ni reventar — solo logear
+        print(f"[AUDITORÍA NATIVA] ⚠️ No se pudo auditar doc {documento_id}: {error_audit}")
+
 try:
     import chromadb
     CHROMA_DISPONIBLE = True
@@ -466,9 +550,12 @@ async def subir_documento(
                         }, archivo_emb_local, indent=4)
                 except Exception as error_fallback:
                     print(f"Error escribiendo copias locales de depuración: {error_fallback}")
-                except Exception:
-                    pass
                     
+        # ── AUDITORÍA NATIVA: disparar análisis automático en background ──
+        asyncio.create_task(
+            ejecutar_auditoria_silenciosa(identificador_documento, nombre_archivo)
+        )
+
         return UploadResponse(
             message="Documento subido y procesado con éxito.",
             document_id=identificador_documento,

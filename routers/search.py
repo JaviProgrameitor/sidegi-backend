@@ -458,7 +458,13 @@ async def search_ia(body: SearchRequest):
                                 "y auditoría de gestión pública para la plataforma SIGEDI. "
                                 "Tu trabajo es responder a la pregunta del usuario en base al contexto de documentos provisto. "
                                 "Responde SIEMPRE en español de forma profesional, clara y concisa. "
-                                "Cita siempre los nombres de los documentos fuente en los que te basas para responder."
+                                "Cita siempre los nombres de los documentos fuente en los que te basas para responder.\n\n"
+                                "ADEMÁS, al final de tu respuesta, agrega una sección separada con el siguiente formato:\n"
+                                "---\n"
+                                "### 🔍 Observaciones de Auditoría\n"
+                                "Señala brevemente cualquier inconsistencia, dato sospechoso, cifra sin respaldo, "
+                                "o aspecto que requiera verificación que hayas detectado en los fragmentos analizados. "
+                                "Si no detectas nada relevante, escribe: 'Sin observaciones de riesgo detectadas.'"
                             ),
                         },
                         {

@@ -407,6 +407,50 @@ async def search_ia(body: SearchRequest):
                         "ruta_archivo": ruta_encontrada
                     }
 
+        # 4b. Obtener reportes de auditoría previa asociados a los documentos
+        auditorias_encontradas = {}
+        if ids_documentos:
+            for doc_id in ids_documentos:
+                reporte_auditoria = None
+                
+                # Intentar Supabase
+                if usando_db_remota and cliente_supabase:
+                    try:
+                        res_aud = await cliente_supabase.consultar_por_filtro(
+                            "documentos_auditoria",
+                            select="hallazgos,nivel_riesgo",
+                            filtros=f"documento_id=eq.{doc_id}"
+                        )
+                        if res_aud and len(res_aud) > 0:
+                            reporte_auditoria = res_aud[0]
+                    except Exception as err_aud_db:
+                        print(f"Error consultando auditoría en Supabase para {doc_id}: {err_aud_db}")
+                
+                # Fallback local
+                if not reporte_auditoria:
+                    ruta_aud_local = f"./depuracion_local/auditoria_{doc_id}.json"
+                    if os.path.exists(ruta_aud_local):
+                        try:
+                            with open(ruta_aud_local, "r", encoding="utf-8") as f_aud:
+                                data_aud = json.load(f_aud)
+                            reporte_auditoria = {
+                                "hallazgos": {"texto": data_aud.get("hallazgos", "")},
+                                "nivel_riesgo": data_aud.get("nivel_riesgo", "bajo")
+                            }
+                        except Exception:
+                            pass
+                
+                if reporte_auditoria:
+                    nivel_riesgo = reporte_auditoria.get("nivel_riesgo", "bajo")
+                    hallazgos_dict = reporte_auditoria.get("hallazgos") or {}
+                    hallazgos_texto = hallazgos_dict.get("texto", "") if isinstance(hallazgos_dict, dict) else str(hallazgos_dict)
+                    
+                    if nivel_riesgo in ("medio", "alto", "critico") and hallazgos_texto:
+                        auditorias_encontradas[doc_id] = {
+                            "nivel_riesgo": nivel_riesgo,
+                            "hallazgos": hallazgos_texto
+                        }
+
         # 5. Algoritmo de Clasificación: Principal y Secundarios
         # Como los fragmentos ya están ordenados por similitud de coseno descendente:
         primer_frag = fragmentos_encontrados[0]
@@ -441,7 +485,20 @@ async def search_ia(body: SearchRequest):
             contexto_items.append(f"[Documento: {nombre_doc} | Similitud: {f['similitud']:.2%}]\n{f['fragmento']}")
         contexto = "\n\n---\n\n".join(contexto_items)
 
-        # 7. Ejecutar consulta generativa RAG usando Groq
+        # 7. Construir información de auditoría previa si existe alguna con riesgo
+        auditoria_contexto = ""
+        if auditorias_encontradas:
+            items_auditoria = []
+            for doc_id, aud in auditorias_encontradas.items():
+                nombre_doc = documentos_metadatos.get(doc_id, {}).get("nombre", "documento_desconocido")
+                items_auditoria.append(
+                    f"--- AUDITORÍA PREVIA DETECTADA PARA EL DOCUMENTO: {nombre_doc} ---\n"
+                    f"NIVEL DE RIESGO: {aud['nivel_riesgo'].upper()}\n"
+                    f"HALLAZGOS/ALERTAS: {aud['hallazgos']}"
+                )
+            auditoria_contexto = "\n\n".join(items_auditoria)
+
+        # 8. Ejecutar consulta generativa RAG usando Groq
         respuesta_ia_texto = ""
         groq_api_key = os.environ.get("GROQ_API_KEY", "")
 
@@ -449,27 +506,46 @@ async def search_ia(body: SearchRequest):
             try:
                 from services.groq_client import completar_chat_con_fallback
                 print("Enviando prompt de RAG a Groq con rotación de modelos...")
+                
+                system_instruction = (
+                    "Eres un asistente de inteligencia artificial especialista en análisis documental "
+                    "y auditoría de gestión pública para la plataforma SIGEDI. "
+                    "Tu trabajo es responder a la pregunta del usuario en base al contexto de documentos provisto. "
+                    "Responde SIEMPRE en español de forma profesional, clara y concisa. "
+                    "Cita siempre los nombres de los documentos fuente en los que te basas para responder.\n\n"
+                )
+                
+                if auditoria_contexto:
+                    system_instruction += (
+                        "IMPORTANTE: Se ha provisto un reporte de auditoría previa en el contexto con un nivel de riesgo "
+                        "medio, alto o crítico. Al final de tu respuesta, DEBES agregar una sección separada con el siguiente formato:\n"
+                        "---\n"
+                        "### 🔍 Observaciones de Auditoría\n"
+                        "[Menciona brevemente los hallazgos de auditoría previa provistos que correspondan a los documentos, "
+                        "resaltando el nivel de riesgo y las banderas rojas encontradas].\n\n"
+                        "Si el contexto de auditoría no indica riesgo para alguno de los documentos principales citados, no lo menciones."
+                    )
+                else:
+                    system_instruction += (
+                        "IMPORTANTE: Bajo ninguna circunstancia debes incluir una sección de 'Observaciones de Auditoría' "
+                        "o similar al final de tu respuesta, ya que el auditor interno no ha reportado riesgos para esta búsqueda. "
+                        "Simplemente responde a la consulta del usuario."
+                    )
+                
+                user_content = f"Contexto documental:\n{contexto}\n\n"
+                if auditoria_contexto:
+                    user_content += f"Reportes de Auditoría Previa:\n{auditoria_contexto}\n\n"
+                user_content += f"Pregunta del usuario: {body.query}"
+                
                 respuesta_ia_texto = await completar_chat_con_fallback(
                     messages=[
                         {
                             "role": "system",
-                            "content": (
-                                "Eres un asistente de inteligencia artificial especialista en análisis documental "
-                                "y auditoría de gestión pública para la plataforma SIGEDI. "
-                                "Tu trabajo es responder a la pregunta del usuario en base al contexto de documentos provisto. "
-                                "Responde SIEMPRE en español de forma profesional, clara y concisa. "
-                                "Cita siempre los nombres de los documentos fuente en los que te basas para responder.\n\n"
-                                "ADEMÁS, al final de tu respuesta, agrega una sección separada con el siguiente formato:\n"
-                                "---\n"
-                                "### 🔍 Observaciones de Auditoría\n"
-                                "Señala brevemente cualquier inconsistencia, dato sospechoso, cifra sin respaldo, "
-                                "o aspecto que requiera verificación que hayas detectado en los fragmentos analizados. "
-                                "Si no detectas nada relevante, escribe: 'Sin observaciones de riesgo detectadas.'"
-                            ),
+                            "content": system_instruction,
                         },
                         {
                             "role": "user",
-                            "content": f"Contexto documental:\n{contexto}\n\nPregunta del usuario: {body.query}",
+                            "content": user_content,
                         },
                     ],
                     temperature=0.3,
@@ -493,7 +569,7 @@ async def search_ia(body: SearchRequest):
                 nombres_secundarios = ", ".join([f"**{d.nombre}** (Similitud: {d.similitud:.2%})" for d in documentos_secundarios])
                 respuesta_ia_texto += f"También se detectaron coincidencias secundarias en los documentos: {nombres_secundarios}."
 
-        # 8. Mapear resultados a SearchResult
+        # 9. Mapear resultados a SearchResult
         fragmentos_resultado = []
         for f in fragmentos_encontrados:
             meta = documentos_metadatos.get(f["documento_id"], {"nombre": "documento_desconocido", "ruta_archivo": ""})

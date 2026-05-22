@@ -35,10 +35,13 @@ async def ejecutar_auditoria_silenciosa(documento_id: str, titulo: str = ""):
                 {
                     "role": "system",
                     "content": (
-                        "Eres un auditor automático de SIGEDI. Analiza el documento y genera un reporte "
-                        "BREVE (máximo 200 palabras) con: 1) Tipo de documento detectado, "
-                        "2) Banderas rojas o anomalías (si existen), 3) Nivel de riesgo (bajo/medio/alto/critico). "
-                        "Si no hay nada sospechoso, indícalo brevemente. Responde en español, formato Markdown."
+                        "Eres un auditor automático de SIGEDI especializado en detección de fraude, alteraciones y anomalías "
+                        "en documentos públicos y administrativos. Analiza el documento en busca de banderas rojas como: fechas incompatibles, "
+                        "firmas o sellos sospechosos o faltantes, alteraciones en los valores numéricos o texto, inconsistencias en "
+                        "los nombres de las autoridades, tachaduras digitales o discrepancias en los montos económicos. "
+                        "Genera un reporte BREVE (máximo 200 palabras) estructurado con: 1) Tipo de documento detectado, "
+                        "2) Banderas rojas o anomalías de integridad/fraude (si existen), y 3) Nivel de riesgo (bajo/medio/alto/critico). "
+                        "Si no hay nada sospechoso, indícalo explícitamente como riesgo bajo. Responde en español, en formato Markdown."
                     ),
                 },
                 {
@@ -52,11 +55,11 @@ async def ejecutar_auditoria_silenciosa(documento_id: str, titulo: str = ""):
 
         # Clasificar nivel de riesgo por palabras clave
         texto_evaluar = hallazgos.lower()
-        if any(p in texto_evaluar for p in ["fraude", "corrupción", "ilegal", "delito", "crítico"]):
+        if any(p in texto_evaluar for p in ["fraude", "corrupción", "ilegal", "delito", "crítico", "apócrifo", "alterado", "falsificado", "falsificación", "fraudulento"]):
             nivel_riesgo = "critico"
-        elif any(p in texto_evaluar for p in ["irregular", "sospechoso", "discrepancia", "sobrecosto"]):
+        elif any(p in texto_evaluar for p in ["irregular", "sospechoso", "discrepancia", "sobrecosto", "anomalía", "advertencia"]):
             nivel_riesgo = "alto"
-        elif any(p in texto_evaluar for p in ["inconsistencia", "omisión", "falta"]):
+        elif any(p in texto_evaluar for p in ["inconsistencia", "omisión", "falta", "duda"]):
             nivel_riesgo = "medio"
         else:
             nivel_riesgo = "bajo"

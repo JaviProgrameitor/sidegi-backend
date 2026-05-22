@@ -56,6 +56,22 @@ class MockCollectionQuery:
             if folder_id and str(meta.get("folder_id")) != str(folder_id):
                 continue
                 
+            # Soft delete: omitir si está marcado como eliminado lógicamente (esta_eliminado = 1)
+            if meta.get("esta_eliminado") == 1:
+                continue
+                
+            doc_id = meta.get("document_id")
+            if doc_id:
+                ruta_int = f"./depuracion_local/{doc_id}.json"
+                if os.path.exists(ruta_int):
+                    try:
+                        with open(ruta_int, "r", encoding="utf-8") as f_int:
+                            datos_int = json.load(f_int)
+                        if datos_int.get("esta_eliminado") == 1:
+                            continue
+                    except Exception:
+                        pass
+                
             item_emb = item.get("embedding", [])
             if len(item_emb) == len(q_emb) and len(q_emb) > 0:
                 similitud = sum(x * y for x, y in zip(item_emb, q_emb))
@@ -102,13 +118,22 @@ model = get_embedder()
 def search_documents(body: SearchRequest):
     query_embedding = model.encode(body.query).tolist()
 
+    # Unificar y sanear el ID de la carpeta
+    folder_id_final = None
+    for valor in [body.folder_id, body.carpeta_id, body.id_folder, body.id_carpeta]:
+        if valor is not None:
+            valor_str = str(valor).strip()
+            if valor_str and valor_str.lower() not in ("null", "undefined", "none"):
+                folder_id_final = valor_str
+                break
+
     where_filter = {"user_id": {"$eq": body.user_id}}
 
-    if body.folder_id:
+    if folder_id_final:
         where_filter = {
             "$and": [
                 {"user_id": {"$eq": body.user_id}},
-                {"folder_id": {"$eq": body.folder_id}},
+                {"folder_id": {"$eq": folder_id_final}},
             ]
         }
 
@@ -125,6 +150,23 @@ def search_documents(body: SearchRequest):
     output = []
     for i, doc in enumerate(results["documents"][0]):
         meta = results["metadatas"][0][i]
+        
+        # Soft delete: omitir si está marcado como eliminado lógicamente (esta_eliminado = 1)
+        if meta.get("esta_eliminado") == 1:
+            continue
+            
+        doc_id = meta.get("document_id")
+        if doc_id:
+            ruta_int = f"./depuracion_local/{doc_id}.json"
+            if os.path.exists(ruta_int):
+                try:
+                    with open(ruta_int, "r", encoding="utf-8") as f_int:
+                        datos_int = json.load(f_int)
+                    if datos_int.get("esta_eliminado") == 1:
+                        continue
+                except Exception:
+                    pass
+        
         distance = results["distances"][0][i]
         similarity = round(1 - distance, 4)
 
@@ -168,12 +210,21 @@ async def search_ia(body: SearchRequest):
                 except (ValueError, TypeError):
                     usr_id_val = body.user_id
                     
+                # Unificar y sanear el ID de la carpeta
+                folder_id_final = None
+                for valor in [body.folder_id, body.carpeta_id, body.id_folder, body.id_carpeta]:
+                    if valor is not None:
+                        valor_str = str(valor).strip()
+                        if valor_str and valor_str.lower() not in ("null", "undefined", "none"):
+                            folder_id_final = valor_str
+                            break
+
                 folder_id_val = None
-                if body.folder_id:
+                if folder_id_final:
                     try:
-                        folder_id_val = int(body.folder_id)
+                        folder_id_val = int(folder_id_final)
                     except (ValueError, TypeError):
-                        folder_id_val = body.folder_id
+                        folder_id_val = folder_id_final
 
                 # La función buscar_fragmentos_similares recibe consulta_embedding, usuario_id_filtro, carpeta_id_filtro y limite
                 resultados_rpc = await cliente_supabase.rpc("buscar_fragmentos_similares", {
@@ -195,6 +246,15 @@ async def search_ia(body: SearchRequest):
             candidatos = []
             ruta_depuracion = "./depuracion_local"
             
+            # Recalcular folder_id_final localmente para fallback
+            folder_id_final = None
+            for valor in [body.folder_id, body.carpeta_id, body.id_folder, body.id_carpeta]:
+                if valor is not None:
+                    valor_str = str(valor).strip()
+                    if valor_str and valor_str.lower() not in ("null", "undefined", "none"):
+                        folder_id_final = valor_str
+                        break
+            
             # Buscar en los archivos individuales embeddings_{id}.json
             if os.path.exists(ruta_depuracion):
                 for archivo_nombre in os.listdir(ruta_depuracion):
@@ -212,7 +272,10 @@ async def search_ia(body: SearchRequest):
                                     datos_int = json.load(f_int)
                                 if body.user_id and str(datos_int.get("usuario_id")) != str(body.user_id):
                                     continue
-                                if body.folder_id and str(datos_int.get("carpeta_id")) != str(body.folder_id):
+                                if folder_id_final and str(datos_int.get("carpeta_id")) != str(folder_id_final):
+                                    continue
+                                # Soft delete: omitir si está marcado como eliminado lógicamente (esta_eliminado = 1)
+                                if datos_int.get("esta_eliminado") == 1:
                                     continue
                             else:
                                 # Excluir si no hay registro de integridad local por seguridad
@@ -247,7 +310,21 @@ async def search_ia(body: SearchRequest):
                         meta = item.get("metadata", {})
                         if body.user_id and str(meta.get("user_id")) != str(body.user_id):
                             continue
-                        if body.folder_id and str(meta.get("folder_id")) != str(body.folder_id):
+                        
+                        # Soft delete: omitir si está marcado como eliminado lógicamente (esta_eliminado = 1)
+                        if meta.get("esta_eliminado") == 1:
+                            continue
+                        
+                        # Recalcular folder_id_final localmente para el mock
+                        folder_id_final = None
+                        for valor in [body.folder_id, body.carpeta_id, body.id_folder, body.id_carpeta]:
+                            if valor is not None:
+                                valor_str = str(valor).strip()
+                                if valor_str and valor_str.lower() not in ("null", "undefined", "none"):
+                                    folder_id_final = valor_str
+                                    break
+                                    
+                        if folder_id_final and str(meta.get("folder_id")) != str(folder_id_final):
                             continue
                             
                         v_emb = item.get("embedding", [])
@@ -370,11 +447,9 @@ async def search_ia(body: SearchRequest):
 
         if groq_api_key:
             try:
-                from groq import Groq
-                cliente_groq = Groq(api_key=groq_api_key)
-                print("Enviando prompt de RAG a Groq...")
-                respuesta_llm = cliente_groq.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                from services.groq_client import completar_chat_con_fallback
+                print("Enviando prompt de RAG a Groq con rotación de modelos...")
+                respuesta_ia_texto = await completar_chat_con_fallback(
                     messages=[
                         {
                             "role": "system",
@@ -394,7 +469,6 @@ async def search_ia(body: SearchRequest):
                     temperature=0.3,
                     max_tokens=1500,
                 )
-                respuesta_ia_texto = respuesta_llm.choices[0].message.content
                 print("Respuesta recibida exitosamente desde Groq.")
             except Exception as error_groq:
                 print(f"Error al conectar con Groq: {error_groq}. Iniciando generación local.")

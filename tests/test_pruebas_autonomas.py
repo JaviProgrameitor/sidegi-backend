@@ -20,6 +20,9 @@ def preparar_datos_supabase(usuario_id: int, carpeta_id: int):
     Crea un usuario temporal y una carpeta en la base de datos de Supabase
     para evitar errores de clave foránea (FK) al subir documentos.
     """
+    # Realizar limpieza previa para asegurar un entorno de prueba 100% limpio y determinista
+    limpiar_datos_supabase(usuario_id, carpeta_id)
+    
     from dotenv import load_dotenv
     load_dotenv(dotenv_path="../.env")
     load_dotenv()
@@ -206,7 +209,7 @@ def esperar_servidor(intentos_maximos: int = 10) -> bool:
         time.sleep(1.5)
     return False
 
-def subir_documento_prueba(ruta_archivo: str, usuario_id: str) -> dict:
+def subir_documento_prueba(ruta_archivo: str, usuario_id: str, carpeta_id: str = None) -> dict:
     """
     Lee un archivo de la ruta especificada y lo sube al backend de SIGEDI.
     """
@@ -220,6 +223,9 @@ def subir_documento_prueba(ruta_archivo: str, usuario_id: str) -> dict:
         contenido = archivo_fisico.read()
 
     campos = {"usuario_id": usuario_id}
+    if carpeta_id:
+        campos["carpeta_id"] = carpeta_id
+        
     archivos = [("archivo", nombre_archivo, contenido)]
     cuerpo, cabeceras = crear_cuerpo_multipart(campos, archivos)
 
@@ -338,6 +344,74 @@ def auditar_documento(documento_id: str, enfoque: str = "general") -> dict:
                 pass
         return {}
 
+def marcar_documento_eliminado_supabase(documento_id: str) -> bool:
+    """
+    Simula el soft delete marcando esta_eliminado = 1 en Supabase.
+    """
+    url_supabase = os.environ.get("SUPABASE_URL", "").rstrip('/')
+    clave_supabase = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not url_supabase or not clave_supabase:
+        return False
+        
+    cabeceras = {
+        "apikey": clave_supabase,
+        "Authorization": f"Bearer {clave_supabase}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+    
+    url = f"{url_supabase}/rest/v1/documentos_integridad?id=eq.{documento_id}"
+    datos = {"esta_eliminado": 1}
+    
+    peticion = urllib.request.Request(
+        url,
+        data=json.dumps(datos).encode('utf-8'),
+        headers=cabeceras,
+        method="PATCH"
+    )
+    
+    try:
+        with urllib.request.urlopen(peticion) as respuesta:
+            print(f"Documento {documento_id} marcado como eliminado en Supabase (esta_eliminado = 1).")
+            return True
+    except Exception as e:
+        print(f"Error al marcar documento como eliminado en Supabase: {e}")
+        return False
+
+def marcar_carpeta_eliminada_supabase(carpeta_id: int) -> bool:
+    """
+    Simula el soft delete marcando esta_eliminado = 1 en una carpeta en Supabase.
+    """
+    url_supabase = os.environ.get("SUPABASE_URL", "").rstrip('/')
+    clave_supabase = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not url_supabase or not clave_supabase:
+        return False
+        
+    cabeceras = {
+        "apikey": clave_supabase,
+        "Authorization": f"Bearer {clave_supabase}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+    
+    url = f"{url_supabase}/rest/v1/folders?id_folder=eq.{carpeta_id}"
+    datos = {"esta_eliminado": 1}
+    
+    peticion = urllib.request.Request(
+        url,
+        data=json.dumps(datos).encode('utf-8'),
+        headers=cabeceras,
+        method="PATCH"
+    )
+    
+    try:
+        with urllib.request.urlopen(peticion) as respuesta:
+            print(f"Carpeta {carpeta_id} marcada como eliminada en Supabase (esta_eliminado = 1).")
+            return True
+    except Exception as e:
+        print(f"Error al marcar carpeta como eliminada en Supabase: {e}")
+        return False
+
 def ejecutar_pruebas():
     """
     Función principal de orquestación de la prueba.
@@ -375,7 +449,7 @@ def ejecutar_pruebas():
         presentacion_ruta = "PRESENTACION INNOVATECNM2026  Hackatec.pdf"
         
         datos_gafete = subir_documento_prueba(gafete_ruta, usuario_prueba_str)
-        datos_presentacion = subir_documento_prueba(presentacion_ruta, usuario_prueba_str)
+        datos_presentacion = subir_documento_prueba(presentacion_ruta, usuario_prueba_str, carpeta_id=str(carpeta_prueba))
         
         if not datos_gafete or not datos_presentacion:
             print("Error: Uno o ambos documentos fallaron en el proceso de subida e indexación.")
@@ -396,7 +470,56 @@ def ejecutar_pruebas():
         print("\n\n--- PRUEBA DE BÚSQUEDA SEMÁNTICA 2 ---")
         realizar_busqueda_ia("que dice el gafete", usuario_prueba_str)
         
-        # Realizar auditorías
+        # --- PRUEBA DE SOFT DELETE DE DOCUMENTO ---
+        print("\n\n--- PRUEBA DE SOFT DELETE: DOCUMENTO ---")
+        # Marcar el gafete como eliminado lógicamente (tanto local en depuracion como en Supabase)
+        marcar_documento_eliminado_supabase(id_gafete)
+        
+        ruta_int_gafete = f"./depuracion_local/{id_gafete}.json"
+        if os.path.exists(ruta_int_gafete):
+            with open(ruta_int_gafete, "r", encoding="utf-8") as f_int:
+                datos_int = json.load(f_int)
+            datos_int["esta_eliminado"] = 1
+            with open(ruta_int_gafete, "w", encoding="utf-8") as f_int:
+                json.dump(datos_int, f_int, indent=4)
+            print("Gafete marcado localmente como eliminado.")
+            
+        print("\nRealizando búsqueda del gafete tras marcarlo como eliminado...")
+        res_soft_doc = realizar_busqueda_ia("que dice el gafete", usuario_prueba_str)
+        doc_principal = res_soft_doc.get("documento_principal")
+        print(f"\n[DEBUG SOFT DELETE DOC] id_gafete esperado: {id_gafete}")
+        print(f"[DEBUG SOFT DELETE DOC] doc_principal devuelto: {doc_principal}")
+        if doc_principal and doc_principal.get("documento_id") == id_gafete:
+            print("¡ALERTA DE ERROR! El documento eliminado se sigue recuperando.")
+        else:
+            print("¡ÉXITO! La IA ignoró correctamente el documento eliminado lógicamente.")
+            
+        # --- PRUEBA DE SOFT DELETE DE CARPETA ---
+        print("\n\n--- PRUEBA DE SOFT DELETE: CARPETA ---")
+        # Marcar la carpeta como eliminada en Supabase
+        marcar_carpeta_eliminada_supabase(carpeta_prueba)
+        
+        # En local no tenemos carpeta, pero podemos marcar el documento de presentación como eliminado lógicamente
+        ruta_int_pres = f"./depuracion_local/{id_presentacion}.json"
+        if os.path.exists(ruta_int_pres):
+            with open(ruta_int_pres, "r", encoding="utf-8") as f_int:
+                datos_int = json.load(f_int)
+            datos_int["esta_eliminado"] = 1
+            with open(ruta_int_pres, "w", encoding="utf-8") as f_int:
+                json.dump(datos_int, f_int, indent=4)
+            print("Presentación marcada localmente como eliminada (simulando carpeta eliminada).")
+            
+        print("\nRealizando búsqueda de la presentación en carpeta eliminada...")
+        res_soft_fld = realizar_busqueda_ia("correo del entregable", usuario_prueba_str)
+        doc_principal_fld = res_soft_fld.get("documento_principal")
+        print(f"\n[DEBUG SOFT DELETE] id_presentacion esperado: {id_presentacion}")
+        print(f"[DEBUG SOFT DELETE] doc_principal_fld devuelto: {doc_principal_fld}")
+        if doc_principal_fld and doc_principal_fld.get("documento_id") == id_presentacion:
+            print("¡ALERTA DE ERROR! El documento en carpeta eliminada se sigue recuperando.")
+        else:
+            print("¡ÉXITO! La IA ignoró correctamente los documentos dentro de carpetas eliminadas lógicamente.")
+
+        # Realizar auditorías (solo con fines informativos)
         print("\n\n--- PRUEBA DE AUDITORÍA 1 (GAFETE) ---")
         auditar_documento(id_gafete, enfoque="general")
         

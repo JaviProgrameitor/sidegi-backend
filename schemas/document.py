@@ -13,6 +13,9 @@ class SearchRequest(BaseModel):
     query: str
     user_id: str
     folder_id: Optional[str] = None
+    carpeta_id: Optional[str] = None
+    id_folder: Optional[str] = None
+    id_carpeta: Optional[str] = None
     limit: int = 5
 
 

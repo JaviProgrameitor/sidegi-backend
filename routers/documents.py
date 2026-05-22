@@ -225,9 +225,21 @@ if url_supabase and clave_supabase:
 async def subir_documento(
     archivo: UploadFile = File(...),
     usuario_id: str = Form(...),
-    carpeta_id: Optional[str] = Form(None)
+    carpeta_id: Optional[str] = Form(None),
+    folder_id: Optional[str] = Form(None),
+    id_folder: Optional[str] = Form(None),
+    id_carpeta: Optional[str] = Form(None)
 ):
     try:
+        # Tolerancia a nombres: unificar carpeta_id, folder_id, id_folder e id_carpeta y sanear
+        carpeta_id_final = None
+        for valor in [carpeta_id, folder_id, id_folder, id_carpeta]:
+            if valor is not None:
+                valor_str = str(valor).strip()
+                if valor_str and valor_str.lower() not in ("null", "undefined", "none"):
+                    carpeta_id_final = valor_str
+                    break
+        
         # 1. Leer el contenido del archivo subido
         contenido_bytes = await archivo.read()
         
@@ -337,8 +349,8 @@ async def subir_documento(
                 "document_path": ruta_documento,
                 "user_id": usuario_id,
             }
-            if carpeta_id:
-                metadato["folder_id"] = carpeta_id
+            if carpeta_id_final:
+                metadato["folder_id"] = carpeta_id_final
                 
             datos_ids.append(id_fragmento)
             datos_embeddings.append(embedding)
@@ -382,11 +394,11 @@ async def subir_documento(
                     usr_id_val = usuario_id
                     
                 folder_id_val = None
-                if carpeta_id:
+                if carpeta_id_final:
                     try:
-                        folder_id_val = int(carpeta_id)
-                    except ValueError:
-                        folder_id_val = carpeta_id
+                        folder_id_val = int(carpeta_id_final)
+                    except (ValueError, TypeError):
+                        folder_id_val = carpeta_id_final
 
                 datos_registro = {
                     "id": identificador_documento,
@@ -434,7 +446,7 @@ async def subir_documento(
                                 "ruta_archivo": ruta_documento,
                                 "hash_sha256": hash_documento,
                                 "usuario_id": usuario_id,
-                                "carpeta_id": carpeta_id
+                                "carpeta_id": carpeta_id_final
                             }, archivo_local, indent=4)
                     else:
                         print("Saltando la copia local de integridad porque ya existe.")

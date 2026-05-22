@@ -1,0 +1,24 @@
+# Secretos y variables de entorno
+.env
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+ENV/
+
+# Python compilado y cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Depuración y base de datos local
+depuracion_local/
+chroma_db/
+
+# Archivos de prueba (PDFs temporales del Hackathon)
+*.pdf

@@ -1,6 +1,5 @@
-
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 
 class UploadResponse(BaseModel):
@@ -23,3 +22,18 @@ class SearchResult(BaseModel):
     chunk_text: str
     similarity: float
     document_path: str
+
+
+class DocumentoCoincidencia(BaseModel):
+    documento_id: str
+    nombre: str
+    similitud: float
+    ruta_archivo: str
+
+
+class SearchIaResponse(BaseModel):
+    respuesta_ia: str
+    respuesta_html: Optional[str] = None
+    documento_principal: Optional[DocumentoCoincidencia] = None
+    documentos_secundarios: List[DocumentoCoincidencia] = []
+    fragmentos: List[SearchResult] = []

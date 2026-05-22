@@ -16,8 +16,8 @@ async def completar_chat_con_fallback(messages, temperature=0.3, max_tokens=1500
     # 1. Intentar con Groq si la clave está disponible
     if groq_api_key:
         client = AsyncGroq(api_key=groq_api_key)
-        # Los dos modelos principales del usuario en Groq
-        modelos = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+        # Los dos modelos principales del usuario en Groq y el modelo agenticio compound
+        modelos = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "compound"]
         
         for modelo in modelos:
             try:
